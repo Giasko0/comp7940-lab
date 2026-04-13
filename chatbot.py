@@ -361,7 +361,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit_or_send(
             query, context, text, reply_markup=InlineKeyboardMarkup(keyboard)
         )
-
     elif query.data.startswith("age:"):
         age = query.data.split(":")[1]
         questionnaire = get_questionnaire(query.from_user.id)
