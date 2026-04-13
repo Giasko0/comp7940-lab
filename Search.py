@@ -22,10 +22,18 @@ def _score_user(me: Dict[str, Any], other: Dict[str, Any]) -> Dict[str, Any]:
     score = 0
     score += len(common_hobbies) * 3
 
-    if me.get("age") and me.get("age") == other.get("age"):
+    same_age = bool(me.get("age") and me.get("age") == other.get("age"))
+    if same_age:
         score += 2
 
-    if me.get("gender") and me.get("gender") == other.get("gender"):
+    same_gender = bool(me.get("gender") and me.get("gender") == other.get("gender"))
+    if same_gender:
+        score += 1
+
+    same_language = bool(
+        me.get("language") and me.get("language") == other.get("language")
+    )
+    if same_language:
         score += 1
 
     return {
@@ -34,6 +42,10 @@ def _score_user(me: Dict[str, Any], other: Dict[str, Any]) -> Dict[str, Any]:
         "username": other.get("username") or "unknown_user",
         "age": other.get("age"),
         "gender": other.get("gender"),
+        "language": other.get("language"),
+        "same_age": same_age,
+        "same_gender": same_gender,
+        "same_language": same_language,
         "common_hobbies": common_hobbies,
     }
 
@@ -69,6 +81,55 @@ def search_similar_users(telegram_user_id: int, top_k: int = 5) -> Dict[str, Any
         "request_user": {
             "telegram_user_id": me.get("telegram_user_id"),
             "username": me.get("username") or me.get("user"),
+            "age": me.get("age"),
+            "gender": me.get("gender"),
+            "language": me.get("language"),
+            "hobbies": me.get("hobbies", []),
         },
         "matches": ranked[:top_k],
     }
+
+
+def match_groups_to_user(telegram_user_id: int):
+    from Mongo_db import db, users_col
+
+    groups_col = db["groups"]
+
+    # 1. Get your profile
+    me = users_col.find_one({"telegram_user_id": telegram_user_id})
+    if not me:
+        return "Please complete your profile first."
+
+    # 2. Get all groups that aren't full
+    available_groups = list(
+        groups_col.find({"$expr": {"$lt": [{"$size": "$members"}, 4]}})
+    )
+
+    group_recommendations = []
+
+    for group in available_groups:
+        group_score = 0
+        member_details = []
+
+        # 3. Check affinity with each member
+        for member_id in group["members"]:
+            member = users_col.find_one({"telegram_user_id": member_id})
+            if member:
+                # Use your existing scoring logic from search.py!
+                result = _score_user(me, member)
+                group_score += result["score"]
+                member_details.append(member.get("username"))
+
+        # Calculate average score for the group
+        avg_score = group_score / len(group["members"]) if group["members"] else 0
+        group_recommendations.append(
+            {
+                "name": group["name"],
+                "score": round(avg_score, 1),
+                "members": member_details,
+            }
+        )
+
+    # 4. Sort by highest affinity
+    group_recommendations.sort(key=lambda x: x["score"], reverse=True)
+    return group_recommendations

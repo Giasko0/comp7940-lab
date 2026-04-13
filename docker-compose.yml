@@ -4,22 +4,26 @@ services:
     container_name: comp7940-bot
     restart: unless-stopped
     depends_on:
-      - mongodb
-    environment:
-      MONGO_URI: mongodb+srv://Gino:1234@chatbot.nejdxh9.mongodb.net/
-      MONGO_DB_NAME: chatbot_db
-      MONGO_COLLECTION_NAME: users
+      - redis
     volumes:
       - ./config.ini:/comp7940-lab/config.ini:ro
+    networks:
+      - comp7940-network
 
-  mongodb:
-    image: mongo:7
-    container_name: comp7940-mongodb
+  redis:
+    image: redis:7-alpine
+    container_name: comp7940-redis
     restart: unless-stopped
-    environment:
-      MONGO_INITDB_DATABASE: comp7940
+    ports:
+      - "6379:6379"
     volumes:
-      - mongodb_data:/data/db
+      - redis_data:/data
+    networks:
+      - comp7940-network
 
 volumes:
-  mongodb_data:
+  redis_data:
+
+networks:
+  comp7940-network:
+    driver: bridge
