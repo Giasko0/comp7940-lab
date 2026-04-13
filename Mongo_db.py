@@ -1,4 +1,4 @@
-import os
+import configparser
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -6,11 +6,20 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import PyMongoError
 
-# Fetch values from your docker-compose environment variables
-mongo_uri = os.getenv(
-    "MONGO_URI", "mongodb+srv://Gino:1234@chatbot.nejdxh9.mongodb.net/"
-)
-db_name = os.getenv("MONGO_DB_NAME", "chatbot_db")
+def _load_config() -> configparser.SectionProxy:
+    config = configparser.ConfigParser()
+    config.read("config.ini")
+    if not config.has_section("MONGO"):
+        raise ValueError("Missing [MONGO] section in config.ini")
+    return config["MONGO"]
+
+
+mongo_config = _load_config()
+mongo_uri = mongo_config.get("URI")
+db_name = mongo_config.get("DB_NAME")
+
+if not mongo_uri or not db_name:
+    raise ValueError("Missing MONGO URI or DB_NAME in config.ini")
 
 # Initialize GLOBALLY (This removes the Pylance errors)
 client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -26,11 +35,9 @@ def get_collection() -> Collection:
     if collection_cache is not None:
         return collection_cache
 
-    mongo_uri = os.getenv(
-        "MONGO_URI", "mongodb+srv://Gino:1234@chatbot.nejdxh9.mongodb.net/"
-    )
-    db_name = os.getenv("MONGO_DB_NAME", "chatbot_db")
-    collection_name = os.getenv("MONGO_COLLECTION_NAME", "users")
+    collection_name = mongo_config.get("COLLECTION_NAME")
+    if not collection_name:
+        raise ValueError("Missing MONGO COLLECTION_NAME in config.ini")
 
     client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
     client.admin.command("ping")
@@ -193,11 +200,5 @@ def delete_group(user_id):
 
 
 def list_groups():
-    groups = groups_col.find({}, {"name": 1, "members": 1, "_id": 0})
-    if not groups:
-        return "No groups available at the moment."
-
-    msg = "Available Groups:\n"
-    for g in groups:
-        msg += f"- {g['name']} ({len(g['members'])}/4 members)\n"
-    return msg
+    groups = list(groups_col.find({}, {"name": 1, "members": 1, "_id": 0}))
+    return groups
