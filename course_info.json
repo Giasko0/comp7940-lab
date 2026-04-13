@@ -7,23 +7,6 @@
     "schedule": {
       "day_time": "Wednesday 10:30-13:20",
       "venue": "WLB104"
-    },
-    "contacts": {
-      "instructor": {
-        "name": "Dr. Amelie Chi Zhou",
-        "email": "amelieczhou@hkbu.edu.hk"
-      },
-      "teaching_assistants": [
-        {
-          "name": "Mr. Chen, Sitian",
-          "email": "csstchen@comp.hkbu.edu.hk"
-        },
-        {
-          "name": "Ms. Chen, Xuetao",
-          "email": "csxtchen@comp.hkbu.edu.hk"
-        }
-      ],
-      "email_subject_hint": "Keep [COMP7940] in the topic"
     }
   },
   "project": {
@@ -37,72 +20,94 @@
       "code_and_slides": "GitHub",
       "report": "Moodle"
     },
-    "objective": "Evolve the lab chatbot into a cloud-deployed Telegram chatbot powered by an LLM, with focus on reliability, observability, DevOps practice, and cost awareness.",
-    "chatbot_scope": {
-      "allowed_domains_examples": [
-        "Campus assistant (course Q&A, schedule helper)",
-        "SME customer support (FAQs with escalation)",
-        "Personal finance or travel concierge",
-        "Event/community helper (matching, recommendations, moderation)"
-      ],
-      "feature_target_by_group_size": "Design and prototype 1-2 meaningful features."
-    },
-    "technical_requirements": {
-      "must_have": [
-        "Chatbot must run on Telegram",
-        "App must use a cloud database provider for data logging",
-        "App must be hosted on a cloud platform",
-        "App must use an LLM API (HKBU/OpenAI/third party)",
-        "App must be managed by git",
-        "Container technologies must be used",
-        "Cloud resources must be monitored and managed with low cost"
-      ],
-      "nice_to_have": [
-        "Good DevOps workflow practices",
-        "Scalability demonstration",
-        "Load balancing",
-        "Orchestration of multiple containers",
-        "Security measures",
-        "Other practical engineering considerations"
+    "objective": "Evolve the lab chatbot into a cloud-deployed Telegram chatbot powered by an LLM, with focus on reliability, observability, DevOps practice, and cost awareness."
+  },
+  "chatbot_scope": {
+    "allowed_domains_examples": [
+      "Campus assistant (course Q&A, schedule helper)",
+      "SME customer support (FAQs with escalation)",
+      "Personal finance or travel concierge",
+      "Event/community helper (matching, recommendations, moderation)"
+    ],
+    "feature_target_by_group_size": "Design and prototype 1-2 meaningful features."
+  },
+  "technical_requirements": {
+    "must_have": [
+      "Chatbot must run on Telegram",
+      "App must use a cloud database provider for data logging",
+      "App must be hosted on a cloud platform",
+      "App must use an LLM API (HKBU/OpenAI/third party)",
+      "App must be managed by git",
+      "Container technologies must be used",
+      "Cloud resources must be monitored and managed with low cost"
+    ],
+    "nice_to_have": [
+      "Good DevOps workflow practices",
+      "Scalability demonstration",
+      "Load balancing",
+      "Orchestration of multiple containers",
+      "Security measures",
+      "Other practical engineering considerations"
+    ]
+  },
+  "deliverables": {
+    "grouping_info_due": "2026-03-03",
+    "running_telegram_chatbot": "Submit by main due date with report",
+    "code": "Hosted on GitHub and not modified after due date",
+    "report_must_include": [
+      "Chatbot ID",
+      "Full name and student ID of all members",
+      "App summary",
+      "Job division among members",
+      "Total cloud resource cost (with billing evidence)",
+      "Evidence of technical requirements fulfillment (e.g., screenshots)"
+    ],
+    "presentation": {
+      "slides_submission": "Upload slides to GitHub repo by main due date",
+      "oral_presentation_dates": [
+        "2026-04-15",
+        "2026-04-22"
       ]
-    },
-    "deliverables": {
-      "grouping_info_due": "2026-03-03",
-      "running_telegram_chatbot": "Submit by main due date with report",
-      "code": "Hosted on GitHub and not modified after due date",
-      "report_must_include": [
-        "Chatbot ID",
-        "Full name and student ID of all members",
-        "App summary",
-        "Job division among members",
-        "Total cloud resource cost (with billing evidence)",
-        "Evidence of technical requirements fulfillment (e.g., screenshots)"
-      ],
-      "presentation": {
-        "slides_submission": "Upload slides to GitHub repo by main due date",
-        "oral_presentation_dates": [
-          "2026-04-15",
-          "2026-04-22"
-        ]
-      }
-    },
-    "grading": {
-      "design_correctness": {
-        "weight": "40%",
-        "rule": "Full marks if all technical requirements are met; each missing must-have requirement reduces full marks by 5%."
-      },
-      "presentation_and_demo": {
-        "weight": "40%",
-        "breakdown": {
-          "design_elements_clarity": "20%",
-          "successful_chatbot_demo": "10%",
-          "language_and_fluency": "10%"
-        }
-      },
-      "documentation": {
-        "weight": "20%",
-        "criteria": "Well-maintained code and clear, concise, informative report."
-      }
     }
+  },
+  "grading": {
+    "design_correctness": {
+      "weight": "40%",
+      "rule": "Full marks if all technical requirements are met; each missing must-have requirement reduces full marks by 5%."
+    },
+    "presentation_and_demo": {
+      "weight": "40%",
+      "breakdown": {
+        "design_elements_clarity": "20%",
+        "successful_chatbot_demo": "10%",
+        "language_and_fluency": "10%"
+      }
+    },
+    "documentation": {
+      "weight": "20%",
+      "criteria": "Well-maintained code and clear, concise, informative report."
+    }
+  },
+  "resource_usage_policy": {
+    "public_resources_allowed": true,
+    "citation_required": true,
+    "note": "Integrate external resources into the lab base code rather than submitting third-party code directly."
+  },
+  "contacts": {
+    "instructor": {
+      "name": "Dr. Amelie Chi Zhou",
+      "email": "amelieczhou@hkbu.edu.hk"
+    },
+    "teaching_assistants": [
+      {
+        "name": "Mr. Chen, Sitian",
+        "email": "csstchen@comp.hkbu.edu.hk"
+      },
+      {
+        "name": "Ms. Chen, Xuetao",
+        "email": "csxtchen@comp.hkbu.edu.hk"
+      }
+    ],
+    "email_subject_hint": "Keep [COMP7940] in the topic"
   }
 }
