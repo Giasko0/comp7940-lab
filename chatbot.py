@@ -35,7 +35,7 @@ from Search import search_similar_users
 from ChatGPT_HKBU import ChatGPT
 
 gpt = None
-COURSE_INFO_PATH = Path(__file__).with_name("course_info.json")
+COURSE_INFO_PATH = Path(__file__).with_name("course_info.md")
 
 AGE_OPTIONS = ["Under 18", "18-20", "21-23", "24-26", "27+"]
 GENDER_OPTIONS = ["Male", "Female", "Prefer not to say"]
@@ -198,7 +198,7 @@ def generate_matchmaking_text(result):
 
 def load_course_info():
     with COURSE_INFO_PATH.open("r", encoding="utf-8") as file:
-        return json.load(file)
+        return file.read()
 
 
 def main():
@@ -780,8 +780,8 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("pending_action", None)
         try:
             course_info = load_course_info()
-        except (FileNotFoundError, json.JSONDecodeError) as exc:
-            logging.exception("Failed to load course_info.json: %s", exc)
+        except FileNotFoundError as exc:
+            logging.exception("Failed to load course_info.md: %s", exc)
             await loading_message.edit_text(
                 "Error loading course information. Please contact the course team.",
                 reply_markup=back_to_menu_markup(),
