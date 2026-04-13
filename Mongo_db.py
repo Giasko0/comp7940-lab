@@ -30,6 +30,12 @@ groups_col = db["groups"]  # Now 'groups_col' is defined
 collection_cache: Optional[Collection] = None
 
 
+def _normalize_telegram_user_id(user_or_id: Any) -> int:
+    if hasattr(user_or_id, "id"):
+        return int(user_or_id.id)
+    return int(user_or_id)
+
+
 def get_collection() -> Collection:
     global collection_cache
     if collection_cache is not None:
@@ -124,25 +130,31 @@ def save_chat_message(telegram_user, user_text: str, bot_text: str) -> bool:
 
 
 def create_group(group_name, leader_id):
-    groups_col = db["groups"]
+    leader_id = _normalize_telegram_user_id(leader_id)
     # Check if the name already exists
     if groups_col.find_one({"name": group_name}):
         return False, "Group name already exists."
 
+    leader = users_col.find_one({"telegram_user_id": leader_id}, {"_id": 0})
+    if not leader:
+        return False, "User profile not found. Complete /start first."
+
     group_data = {
         "name": group_name,
         "leader_id": leader_id,
-        "members": [leader_id],  # Leader is the first member
+        "members": [leader_id],
     }
     groups_col.insert_one(group_data)
-    # Update the user to reference this group
-    users_col.update_one({"user_id": leader_id}, {"$set": {"group_name": group_name}})
+    users_col.update_one(
+        {"telegram_user_id": leader_id},
+        {"$set": {"group_name": group_name, "in_group": True}},
+    )
     return True, f"Group '{group_name}' created successfully!"
 
 
 # Join a group (with 4-person limit)
 def join_group(group_name, user_id):
-    groups_col = db["groups"]
+    user_id = _normalize_telegram_user_id(user_id)
     group = groups_col.find_one({"name": group_name})
 
     if not group:
@@ -150,25 +162,34 @@ def join_group(group_name, user_id):
     if len(group["members"]) >= 4:
         return False, "Group is full (max 4 people)."
 
-    # Check if user is already in a group
-    user = users_col.find_one({"user_id": user_id})
+    user = users_col.find_one({"telegram_user_id": user_id})
+    if not user:
+        return False, "User profile not found. Complete /start first."
     if user.get("group_name"):
         return False, "You are already in a group. Leave it first."
 
     groups_col.update_one({"name": group_name}, {"$push": {"members": user_id}})
-    users_col.update_one({"user_id": user_id}, {"$set": {"group_name": group_name}})
+    users_col.update_one(
+        {"telegram_user_id": user_id},
+        {"$set": {"group_name": group_name, "in_group": True}},
+    )
     return True, f"You joined group {group_name}."
 
 
 # Leave a group logic
 def leave_group(user_id):
-    user = users_col.find_one({"user_id": user_id})
+    user_id = _normalize_telegram_user_id(user_id)
+    user = users_col.find_one({"telegram_user_id": user_id})
+    if not user:
+        return False, "User profile not found. Complete /start first."
+
     group_name = user.get("group_name")
     if not group_name:
         return False, "You are not in any group."
 
-    groups_col = db["groups"]
     group = groups_col.find_one({"name": group_name})
+    if not group:
+        return False, "Group not found."
 
     # If the leader leaves, they must delegate first or delete the group
     if group["leader_id"] == user_id:
@@ -178,11 +199,15 @@ def leave_group(user_id):
         )
 
     groups_col.update_one({"name": group_name}, {"$pull": {"members": user_id}})
-    users_col.update_one({"user_id": user_id}, {"$unset": {"group_name": ""}})
+    users_col.update_one(
+        {"telegram_user_id": user_id},
+        {"$unset": {"group_name": ""}, "$set": {"in_group": False}},
+    )
     return True, "You left the group."
 
 
 def delete_group(user_id):
+    user_id = _normalize_telegram_user_id(user_id)
     # Only the leader can delete
     group = groups_col.find_one({"leader_id": user_id})
     if not group:
@@ -192,13 +217,19 @@ def delete_group(user_id):
         )
 
     group_name = group["name"]
-    # 1. Remove group reference from all members
-    users_col.update_many({"group_name": group_name}, {"$unset": {"group_name": ""}})
-    # 2. Delete the group document
+    users_col.update_many(
+        {"group_name": group_name},
+        {"$unset": {"group_name": ""}, "$set": {"in_group": False}},
+    )
     groups_col.delete_one({"name": group_name})
     return True, f"Group '{group_name}' has been deleted."
 
 
+def get_group_for_user(user_id):
+    user_id = _normalize_telegram_user_id(user_id)
+    return groups_col.find_one({"members": user_id}, {"_id": 0})
+
+
 def list_groups():
-    groups = list(groups_col.find({}, {"name": 1, "members": 1, "_id": 0}))
+    groups = list(groups_col.find({}, {"name": 1, "members": 1, "leader_id": 1, "_id": 0}))
     return groups

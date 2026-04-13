@@ -6,8 +6,17 @@ This program requires the following modules:
 - redis==5.0.1
 """
 
-from Mongo_db import create_group, join_group, delete_group, list_groups, leave_group
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from pathlib import Path
+
+from Mongo_db import (
+    create_group,
+    delete_group,
+    get_group_for_user,
+    join_group,
+    leave_group,
+    list_groups,
+)
+from telegram import BotCommand, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.ext import (
     ApplicationBuilder,
@@ -18,7 +27,9 @@ from telegram.ext import (
     filters,
 )
 import configparser
+import json
 import logging
+from urllib.parse import quote_plus, unquote_plus
 from Mongo_db import get_user_profile as mongo_get_user_profile
 from Mongo_db import get_user_profile_by_username
 from Mongo_db import save_chat_message, save_user_profile as mongo_save_user_profile
@@ -26,6 +37,7 @@ from Search import search_similar_users
 from ChatGPT_HKBU import ChatGPT
 
 gpt = None
+COURSE_INFO_PATH = Path(__file__).with_name("course_info.json")
 
 AGE_OPTIONS = ["Under 18", "18-20", "21-23", "24-26", "27+"]
 GENDER_OPTIONS = ["Male", "Female", "Prefer not to say"]
@@ -94,7 +106,9 @@ async def safe_edit_or_send(query, context, text, reply_markup=None):
 
 
 def set_questionnaire(telegram_user, questionnaire):
-    return mongo_save_user_profile(telegram_user, questionnaire, completed=False)
+    profile = get_user_profile(telegram_user.id, telegram_user.username)
+    keep_completed = bool(profile and profile.get("completed"))
+    return mongo_save_user_profile(telegram_user, questionnaire, completed=keep_completed)
 
 
 def mark_profile_completed(telegram_user, questionnaire):
@@ -105,6 +119,88 @@ def get_config_value(config, section, option, fallback=None):
     if config.has_section(section) and config.has_option(section, option):
         return config[section][option]
     return fallback
+
+
+def build_main_menu_keyboard(include_profile_edit: bool = False, include_back: bool = False):
+    keyboard = [
+        [InlineKeyboardButton("Find people similar to you", callback_data="find_similar")],
+        [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
+        [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
+    ]
+    if include_profile_edit:
+        keyboard.append([InlineKeyboardButton("Edit profile", callback_data="edit_profile")])
+    if include_back:
+        keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def back_to_menu_markup():
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Back to menu", callback_data="back_to_main")]]
+    )
+
+
+def with_back_to_menu(rows):
+    return InlineKeyboardMarkup(
+        rows + [[InlineKeyboardButton("Back to menu", callback_data="back_to_main")]]
+    )
+
+
+def build_edit_profile_keyboard():
+    return with_back_to_menu(
+        [
+            [InlineKeyboardButton("Edit age", callback_data="edit_question:age")],
+            [InlineKeyboardButton("Edit language", callback_data="edit_question:language")],
+            [InlineKeyboardButton("Edit gender", callback_data="edit_question:gender")],
+            [InlineKeyboardButton("Edit hobbies", callback_data="edit_question:hobbies")],
+        ]
+    )
+
+
+def build_group_join_rows(groups):
+    rows = []
+    for group in groups:
+        name = group.get("name", "Unknown")
+        members = len(group.get("members", []))
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{name} ({members}/4)",
+                    callback_data=f"group_join:{quote_plus(name)}",
+                )
+            ]
+        )
+    return rows
+
+
+def build_manage_grouping_view(user_id: int):
+    groups = list_groups()
+    current_group = get_group_for_user(user_id)
+    has_group = current_group is not None
+    is_leader = bool(has_group and current_group.get("leader_id") == user_id)
+
+    rows = build_group_join_rows(groups)
+    if not has_group:
+        rows.append([InlineKeyboardButton("Create group", callback_data="group_create_prompt")])
+    if has_group:
+        rows.append([InlineKeyboardButton("Leave current group", callback_data="group_leave")])
+    if is_leader:
+        rows.append([InlineKeyboardButton("Delete my group", callback_data="group_delete")])
+
+    title = "Manage grouping: pick a group to join or use actions below."
+    return title, with_back_to_menu(rows)
+
+
+def generate_matchmaking_text(result):
+    return gpt.submit_matchmaking(
+        result.get("request_user", {}),
+        result.get("matches", []),
+    ).strip()
+
+
+def load_course_info():
+    with COURSE_INFO_PATH.open("r", encoding="utf-8") as file:
+        return json.load(file)
 
 
 def main():
@@ -127,7 +223,17 @@ def main():
     telegram_token = get_config_value(config, "TELEGRAM", "ACCESS_TOKEN")
     if not telegram_token:
         raise ValueError("Missing Telegram bot token in config.ini [TELEGRAM].")
-    app = ApplicationBuilder().token(telegram_token).build()
+
+    async def post_init(application):
+        await application.bot.set_my_commands(
+            [
+                BotCommand("start", "Start the bot"),
+                BotCommand("help", "Show the command list"),
+                BotCommand("group", "Manage groups"),
+            ]
+        )
+
+    app = ApplicationBuilder().token(telegram_token).post_init(post_init).build()
 
     # Register handlers
     logging.info("INIT: Registering bot handlers...")
@@ -148,28 +254,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = get_user_profile(user_id, username)
 
     if profile and profile.get("completed"):
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "Find people similar to you", callback_data="find_similar"
-                )
-            ],
-            [InlineKeyboardButton("Browse groups", callback_data="browse_groups")],
-        ]
+        reply_markup = build_main_menu_keyboard(
+            include_profile_edit=True, include_back=False
+        )
         text = "Welcome back! What would you like to do next?"
     else:
-        keyboard = [
-            [InlineKeyboardButton("Create profile", callback_data="create_profile")]
-        ]
+        reply_markup = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("Create profile", callback_data="create_profile")],
+                [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
+                [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
+            ]
+        )
         text = "Welcome to our bot! Create your profile so we can match you with the best study group."
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "🤖 *Virtual Professor - Command List*\n\n"
+        "🤖 *Maestro - Command List*\n\n"
         "*General Commands:*\n"
         "/start - Start the bot and take the questionnaire\n"
         "/help - Show this help message\n\n"
@@ -179,15 +283,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/group leave - Leave your current group\n"
         "/group delete - Delete the group (Leaders only)\n"
         "/group list - See all available groups\n\n"
-        "*Matchmaking:*\n"
-        "Use the buttons in the menu to find people with similar interests!"
+        "*Main Menu:*\n"
+        "Find similar people, manage grouping, edit your profile, or ask the Virtual Professor.\n"
+        "Use *Edit profile* to update one specific answer without redoing everything."
     )
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    await update.message.reply_text(
+        help_text, parse_mode="Markdown", reply_markup=back_to_menu_markup()
+    )
 
 
 async def ask_age(query, context, error=None):
     questionnaire = get_questionnaire(query.from_user.id)
     selected = questionnaire.get("age")
+    single_edit_mode = context.user_data.get("single_edit_mode", False)
     keyboard = [
         [
             InlineKeyboardButton(
@@ -197,7 +305,15 @@ async def ask_age(query, context, error=None):
         ]
         for option in AGE_OPTIONS
     ]
-    keyboard.append([InlineKeyboardButton("Next", callback_data="next_language")])
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                "Save changes" if single_edit_mode else "Next",
+                callback_data="finish_profile" if single_edit_mode else "next_language",
+            )
+        ]
+    )
+    keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     text = "Question 1/4: What is your age range?"
     if error:
         text += f"\n\n{error}"
@@ -209,6 +325,7 @@ async def ask_age(query, context, error=None):
 async def ask_language(query, context, error=None):
     questionnaire = get_questionnaire(query.from_user.id)
     selected = questionnaire.get("language")
+    single_edit_mode = context.user_data.get("single_edit_mode", False)
     keyboard = [
         [
             InlineKeyboardButton(
@@ -218,7 +335,15 @@ async def ask_language(query, context, error=None):
         ]
         for option in LANGUAGE_OPTIONS
     ]
-    keyboard.append([InlineKeyboardButton("Next", callback_data="next_gender")])
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                "Save changes" if single_edit_mode else "Next",
+                callback_data="finish_profile" if single_edit_mode else "next_gender",
+            )
+        ]
+    )
+    keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     text = "Question 2/4: What language do you speak?"
     if error:
         text += f"\n\n{error}"
@@ -230,6 +355,7 @@ async def ask_language(query, context, error=None):
 async def ask_gender(query, context, error=None):
     questionnaire = get_questionnaire(query.from_user.id)
     selected = questionnaire.get("gender")
+    single_edit_mode = context.user_data.get("single_edit_mode", False)
     keyboard = [
         [
             InlineKeyboardButton(
@@ -239,7 +365,15 @@ async def ask_gender(query, context, error=None):
         ]
         for option in GENDER_OPTIONS
     ]
-    keyboard.append([InlineKeyboardButton("Next", callback_data="next_hobbies")])
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                "Save changes" if single_edit_mode else "Next",
+                callback_data="finish_profile" if single_edit_mode else "next_hobbies",
+            )
+        ]
+    )
+    keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     text = "Question 3/4: What is your gender?"
     if error:
         text += f"\n\n{error}"
@@ -251,6 +385,7 @@ async def ask_gender(query, context, error=None):
 async def ask_hobbies(query, context, error=None):
     questionnaire = get_questionnaire(query.from_user.id)
     selected = questionnaire.get("hobbies", [])
+    single_edit_mode = context.user_data.get("single_edit_mode", False)
     keyboard = [
         [
             InlineKeyboardButton(
@@ -260,7 +395,15 @@ async def ask_hobbies(query, context, error=None):
         ]
         for option in HOBBY_OPTIONS
     ]
-    keyboard.append([InlineKeyboardButton("Finish", callback_data="finish_profile")])
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                "Save changes" if single_edit_mode else "Finish",
+                callback_data="finish_profile",
+            )
+        ]
+    )
+    keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     text = "Question 4/4: What are your hobbies (You can pick multiple)?"
     if error:
         text += f"\n\n{error}"
@@ -272,22 +415,92 @@ async def ask_hobbies(query, context, error=None):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    if query.data not in {"virtual_professor", "group_create_prompt"}:
+        context.user_data.pop("pending_action", None)
 
     if query.data == "create_profile":
-        saved = set_questionnaire(query.from_user, _default_questionnaire())
+        context.user_data["single_edit_mode"] = False
+        saved = mongo_save_user_profile(
+            query.from_user, _default_questionnaire(), completed=False
+        )
         if not saved:
             await safe_edit_or_send(
                 query,
                 context,
                 "Failed to initialize your profile. Please try again.",
+                reply_markup=back_to_menu_markup(),
             )
             return
         await ask_age(query, context)
+    elif query.data == "virtual_professor":
+        context.user_data["single_edit_mode"] = False
+        context.user_data["pending_action"] = "virtual_professor"
+        await safe_edit_or_send(
+            query,
+            context,
+            "Ask your question to the Virtual Professor.",
+            reply_markup=back_to_menu_markup(),
+        )
+    elif query.data == "manage_grouping":
+        context.user_data["single_edit_mode"] = False
+        text, reply_markup = build_manage_grouping_view(query.from_user.id)
+        await safe_edit_or_send(query, context, text, reply_markup=reply_markup)
+    elif query.data == "edit_profile":
+        if not get_user_profile(query.from_user.id, query.from_user.username):
+            saved = mongo_save_user_profile(
+                query.from_user, _default_questionnaire(), completed=False
+            )
+            if not saved:
+                await safe_edit_or_send(
+                    query,
+                    context,
+                    "Failed to load your profile. Please try again.",
+                    reply_markup=back_to_menu_markup(),
+                )
+                return
+        context.user_data["single_edit_mode"] = False
+        await safe_edit_or_send(
+            query,
+            context,
+            "Choose what you want to edit:",
+            reply_markup=build_edit_profile_keyboard(),
+        )
+    elif query.data == "group_create_prompt":
+        context.user_data["pending_action"] = "group_create"
+        await safe_edit_or_send(
+            query,
+            context,
+            "Send the group name you want to create.",
+            reply_markup=back_to_menu_markup(),
+        )
+    elif query.data.startswith("edit_question:"):
+        field = query.data.split(":", 1)[1]
+        context.user_data["single_edit_mode"] = True
+        if field == "age":
+            await ask_age(query, context)
+        elif field == "language":
+            await ask_language(query, context)
+        elif field == "gender":
+            await ask_gender(query, context)
+        elif field == "hobbies":
+            await ask_hobbies(query, context)
+        else:
+            await safe_edit_or_send(
+                query,
+                context,
+                "Unknown profile field.",
+                reply_markup=back_to_menu_markup(),
+            )
     elif query.data == "find_similar":
         await query.message.edit_text("Searching for similar users...")
         result = search_similar_users(query.from_user.id, top_k=5)
         if not result.get("ok"):
-            await safe_edit_or_send(query, context, f"Error: {result.get('error')}")
+            await safe_edit_or_send(
+                query,
+                context,
+                f"Error: {result.get('error')}",
+                reply_markup=back_to_menu_markup(),
+            )
             return
 
         matches = result.get("matches", [])
@@ -296,70 +509,46 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 query,
                 context,
                 "No similar users found yet. Ask a friend to complete their profile too.",
+                reply_markup=back_to_menu_markup(),
             )
             return
 
-        lines = ["People similar to you:"]
-        for match in matches:
-            username = match.get("username", "Unknown")
-            score = match.get("score", 0)
-            lines.append(f"• @{username} (Match: {score:.0%})")
-
-        text = "\n".join(lines)
-        keyboard = [
-            [InlineKeyboardButton("Back to main menu", callback_data="back_to_main")]
-        ]
-        await safe_edit_or_send(
-            query, context, text, reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    elif query.data == "browse_groups":
-        groups = list_groups()
-        if not groups:
+        text = generate_matchmaking_text(result)
+        if text.startswith("Error:"):
             await safe_edit_or_send(
                 query,
                 context,
-                "No groups available yet. Be the first to create one!",
+                "Error while generating matchmaking recommendations. Please try again.",
+                reply_markup=back_to_menu_markup(),
             )
             return
-
-        lines = ["Available groups:"]
-        for group in groups:
-            name = group.get("name", "Unknown")
-            members = len(group.get("members", []))
-            lines.append(f"• {name} ({members} members)")
-
-        text = "\n".join(lines)
-        keyboard = [
-            [InlineKeyboardButton("Back to main menu", callback_data="back_to_main")]
-        ]
         await safe_edit_or_send(
-            query, context, text, reply_markup=InlineKeyboardMarkup(keyboard)
+            query, context, text, reply_markup=back_to_menu_markup()
         )
 
+    elif query.data == "browse_groups":
+        text, reply_markup = build_manage_grouping_view(query.from_user.id)
+        await safe_edit_or_send(query, context, text, reply_markup=reply_markup)
+
     elif query.data == "back_to_main":
+        context.user_data["single_edit_mode"] = False
         profile = get_user_profile(query.from_user.id)
         if profile and profile.get("completed"):
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "Find people similar to you", callback_data="find_similar"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "Browse groups", callback_data="browse_groups"
-                    )
-                ],
-            ]
+            reply_markup = build_main_menu_keyboard(
+                include_profile_edit=True, include_back=False
+            )
             text = "What would you like to do next?"
         else:
-            keyboard = [
-                [InlineKeyboardButton("Create profile", callback_data="create_profile")]
-            ]
+            reply_markup = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("Create profile", callback_data="create_profile")],
+                    [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
+                    [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
+                ]
+            )
             text = "Welcome to our bot! Create your profile so we can match you with the best study group."
         await safe_edit_or_send(
-            query, context, text, reply_markup=InlineKeyboardMarkup(keyboard)
+            query, context, text, reply_markup=reply_markup
         )
     elif query.data.startswith("age:"):
         age = query.data.split(":")[1]
@@ -418,19 +607,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "finish_profile":
         questionnaire = get_questionnaire(query.from_user.id)
         mark_profile_completed(query.from_user, questionnaire)
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "Find people similar to you", callback_data="find_similar"
-                )
-            ],
-            [InlineKeyboardButton("Browse groups", callback_data="browse_groups")],
-        ]
+        single_edit_mode = context.user_data.get("single_edit_mode", False)
+        context.user_data["single_edit_mode"] = False
         await safe_edit_or_send(
             query,
             context,
-            "Profile completed! What would you like to do next?",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            (
+                "Profile updated! What would you like to do next?"
+                if single_edit_mode
+                else "Profile completed! What would you like to do next?"
+            ),
+            reply_markup=build_main_menu_keyboard(
+                include_profile_edit=True, include_back=False
+            ),
         )
 
     # Group commands handlers
@@ -440,33 +629,72 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_group_callback(query, context):
     """Handle group-related callback queries"""
-    data = query.data.split("_", 2)
-    if len(data) < 2:
-        return
-
-    action = data[1]
-    group_name = data[2] if len(data) > 2 else None
+    payload = query.data[len("group_") :]
+    action, separator, value = payload.partition(":")
+    group_name = unquote_plus(value) if separator and value else None
+    if not separator:
+        # Backward compatibility for old callback format: group_join_<name>
+        legacy = query.data.split("_", 2)
+        if len(legacy) >= 3:
+            action = legacy[1]
+            group_name = legacy[2]
 
     if action == "join" and group_name:
-        result = join_group(group_name, query.from_user)
-        if result:
-            await safe_edit_or_send(query, context, f"Successfully joined {group_name}!")
+        context.user_data.pop("pending_action", None)
+        ok, message = join_group(group_name, query.from_user.id)
+        if ok:
+            await safe_edit_or_send(
+                query,
+                context,
+                f"Successfully joined {group_name}!",
+                reply_markup=back_to_menu_markup(),
+            )
         else:
-            await safe_edit_or_send(query, context, "Failed to join group.")
+            await safe_edit_or_send(
+                query, context, message, reply_markup=back_to_menu_markup()
+            )
+
+    elif action == "delete":
+        context.user_data.pop("pending_action", None)
+        ok, message = delete_group(query.from_user.id)
+        await safe_edit_or_send(
+            query,
+            context,
+            message if not ok else "Group deleted!",
+            reply_markup=back_to_menu_markup(),
+        )
+
+    elif action == "create_prompt":
+        context.user_data["pending_action"] = "group_create"
+        await safe_edit_or_send(
+            query,
+            context,
+            "Send the group name you want to create.",
+            reply_markup=back_to_menu_markup(),
+        )
 
     elif action == "leave":
-        result = leave_group(query.from_user)
-        if result:
-            await safe_edit_or_send(query, context, "Successfully left the group!")
+        context.user_data.pop("pending_action", None)
+        ok, message = leave_group(query.from_user.id)
+        if ok:
+            await safe_edit_or_send(
+                query,
+                context,
+                "Successfully left the group!",
+                reply_markup=back_to_menu_markup(),
+            )
         else:
-            await safe_edit_or_send(query, context, "You are not in any group.")
+            await safe_edit_or_send(
+                query, context, message, reply_markup=back_to_menu_markup()
+            )
 
 
 async def group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /group command"""
     if not context.args or len(context.args) == 0:
         await update.message.reply_text(
-            "Usage: /group create [name] | /group join [name] | /group leave | /group delete | /group list"
+            "Usage: /group create [name] | /group join [name] | /group leave | /group delete | /group list",
+            reply_markup=back_to_menu_markup(),
         )
         return
 
@@ -475,64 +703,98 @@ async def group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "create":
         group_name = " ".join(context.args[1:]) if len(context.args) > 1 else None
         if not group_name:
-            await update.message.reply_text("Usage: /group create [group_name]")
+            await update.message.reply_text(
+                "Usage: /group create [group_name]", reply_markup=back_to_menu_markup()
+            )
             return
-        result = create_group(group_name, update.effective_user)
-        if result:
-            await update.message.reply_text(f"Group '{group_name}' created!")
-        else:
-            await update.message.reply_text("Failed to create group.")
+        ok, message = create_group(group_name, update.effective_user.id)
+        await update.message.reply_text(
+            message if not ok else f"Group '{group_name}' created!",
+            reply_markup=back_to_menu_markup(),
+        )
 
     elif action == "list":
         groups = list_groups()
         if not groups:
-            await update.message.reply_text("No groups available.")
+            await update.message.reply_text(
+                "No groups available.", reply_markup=back_to_menu_markup()
+            )
         else:
-            lines = ["Available groups:"]
-            for group in groups:
-                name = group.get("name", "Unknown")
-                members = len(group.get("members", []))
-                lines.append(f"• {name} ({members} members)")
-            await update.message.reply_text("\n".join(lines))
+            rows = build_group_join_rows(groups)
+            await update.message.reply_text(
+                "Select a group to join:",
+                reply_markup=with_back_to_menu(rows),
+            )
 
     elif action == "join":
         group_name = " ".join(context.args[1:]) if len(context.args) > 1 else None
         if not group_name:
-            await update.message.reply_text("Usage: /group join [group_name]")
+            await update.message.reply_text(
+                "Usage: /group join [group_name]", reply_markup=back_to_menu_markup()
+            )
             return
-        result = join_group(group_name, update.effective_user)
-        if result:
-            await update.message.reply_text(f"Joined '{group_name}'!")
-        else:
-            await update.message.reply_text("Failed to join group.")
+        ok, message = join_group(group_name, update.effective_user.id)
+        await update.message.reply_text(
+            message if not ok else f"Joined '{group_name}'!",
+            reply_markup=back_to_menu_markup(),
+        )
 
     elif action == "leave":
-        result = leave_group(update.effective_user)
-        if result:
-            await update.message.reply_text("Left the group!")
-        else:
-            await update.message.reply_text("You are not in any group.")
+        ok, message = leave_group(update.effective_user.id)
+        await update.message.reply_text(
+            message if not ok else "Left the group!",
+            reply_markup=back_to_menu_markup(),
+        )
 
     elif action == "delete":
-        result = delete_group(update.effective_user)
-        if result:
-            await update.message.reply_text("Group deleted!")
-        else:
-            await update.message.reply_text("You are not a group leader.")
+        ok, message = delete_group(update.effective_user.id)
+        await update.message.reply_text(
+            message if not ok else "Group deleted!",
+            reply_markup=back_to_menu_markup(),
+        )
+
+    else:
+        await update.message.reply_text(
+            "Unknown group action. Use: create, join, leave, delete, list.",
+            reply_markup=back_to_menu_markup(),
+        )
 
 
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle regular text messages with async Celery tasks"""
     logging.info("UPDATE: " + str(update))
     loading_message = await update.message.reply_text("Thinking...")
+    pending_action = context.user_data.get("pending_action")
+    user_text = update.message.text.strip()
 
-    # send the user message to the ChatGPT client
-    response = gpt.submit(update.message.text)
+    if pending_action == "group_create":
+        if not user_text:
+            await loading_message.edit_text(
+                "Group name cannot be empty. Please send a valid group name.",
+                reply_markup=back_to_menu_markup(),
+            )
+            return
+        context.user_data.pop("pending_action", None)
+        ok, response = create_group(user_text, update.effective_user.id)
+        if ok:
+            response = f"Group '{user_text}' created!"
+    elif pending_action == "virtual_professor":
+        context.user_data.pop("pending_action", None)
+        try:
+            course_info = load_course_info()
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            logging.exception("Failed to load course_info.json: %s", exc)
+            await loading_message.edit_text(
+                "Error loading course information. Please contact the course team.",
+                reply_markup=back_to_menu_markup(),
+            )
+            return
+        response = gpt.submit_virtual_professor(user_text, course_info)
+    else:
+        response = gpt.submit(user_text)
 
-    save_chat_message(update.effective_user, update.message.text, response)
-
-    # send the response to the Telegram box client
-    await loading_message.edit_text(response)
+    save_chat_message(update.effective_user, user_text, response)
+    await loading_message.edit_text(response, reply_markup=back_to_menu_markup())
 
 
 if __name__ == "__main__":
