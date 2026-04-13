@@ -72,3 +72,48 @@ def search_similar_users(telegram_user_id: int, top_k: int = 5) -> Dict[str, Any
         },
         "matches": ranked[:top_k],
     }
+
+
+def match_groups_to_user(telegram_user_id: int):
+    from Mongo_db import db, users_col
+
+    groups_col = db["groups"]
+
+    # 1. Get your profile
+    me = users_col.find_one({"telegram_user_id": telegram_user_id})
+    if not me:
+        return "Please complete your profile first."
+
+    # 2. Get all groups that aren't full
+    available_groups = list(
+        groups_col.find({"$expr": {"$lt": [{"$size": "$members"}, 4]}})
+    )
+
+    group_recommendations = []
+
+    for group in available_groups:
+        group_score = 0
+        member_details = []
+
+        # 3. Check affinity with each member
+        for member_id in group["members"]:
+            member = users_col.find_one({"telegram_user_id": member_id})
+            if member:
+                # Use your existing scoring logic from search.py!
+                result = _score_user(me, member)
+                group_score += result["score"]
+                member_details.append(member.get("username"))
+
+        # Calculate average score for the group
+        avg_score = group_score / len(group["members"]) if group["members"] else 0
+        group_recommendations.append(
+            {
+                "name": group["name"],
+                "score": round(avg_score, 1),
+                "members": member_details,
+            }
+        )
+
+    # 4. Sort by highest affinity
+    group_recommendations.sort(key=lambda x: x["score"], reverse=True)
+    return group_recommendations
