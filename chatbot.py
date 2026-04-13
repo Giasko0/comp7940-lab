@@ -41,6 +41,10 @@ AGE_OPTIONS = ["Under 18", "18-20", "21-23", "24-26", "27+"]
 GENDER_OPTIONS = ["Male", "Female", "Prefer not to say"]
 HOBBY_OPTIONS = ["Programming", "Sports", "Art", "Music"]
 LANGUAGE_OPTIONS = ["English", "Chinese", "Spanish", "Other"]
+PROFILE_PRIVACY_DISCLAIMER = (
+    "Privacy notice: the data you share will be used only for bot features "
+    "and will not be sold to third parties."
+)
 
 
 def _default_questionnaire():
@@ -121,15 +125,22 @@ def get_config_value(config, section, option, fallback=None):
 
 def build_main_menu_keyboard(include_profile_edit: bool = False, include_back: bool = False):
     keyboard = [
+        [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
         [InlineKeyboardButton("Find people similar to you", callback_data="find_similar")],
         [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
-        [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
     ]
     if include_profile_edit:
         keyboard.append([InlineKeyboardButton("Edit profile", callback_data="edit_profile")])
     if include_back:
         keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     return InlineKeyboardMarkup(keyboard)
+
+
+def build_profile_creation_intro():
+    return (
+        "Create your profile so we can match you with the best study group.\n\n"
+        f"{PROFILE_PRIVACY_DISCLAIMER}"
+    )
 
 
 def back_to_menu_markup():
@@ -259,12 +270,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         reply_markup = InlineKeyboardMarkup(
             [
+                [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
                 [InlineKeyboardButton("Create profile", callback_data="create_profile")],
                 [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
-                [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
             ]
         )
-        text = "Welcome to our bot! Create your profile so we can match you with the best study group."
+        text = build_profile_creation_intro()
 
     await update.message.reply_text(text, reply_markup=reply_markup)
 
@@ -294,6 +305,9 @@ async def ask_age(query, context, error=None):
     questionnaire = get_questionnaire(query.from_user.id)
     selected = questionnaire.get("age")
     single_edit_mode = context.user_data.get("single_edit_mode", False)
+    show_privacy_disclaimer = context.user_data.pop(
+        "show_profile_privacy_disclaimer", False
+    )
     keyboard = [
         [
             InlineKeyboardButton(
@@ -312,9 +326,13 @@ async def ask_age(query, context, error=None):
         ]
     )
     keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
-    text = "Question 1/4: What is your age range?"
+    parts = []
+    if show_privacy_disclaimer:
+        parts.append(PROFILE_PRIVACY_DISCLAIMER)
+    parts.append("Question 1/4: What is your age range?")
     if error:
-        text += f"\n\n{error}"
+        parts.append(error)
+    text = "\n\n".join(parts)
     await safe_edit_or_send(
         query, context, text, reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -418,6 +436,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "create_profile":
         context.user_data["single_edit_mode"] = False
+        context.user_data["show_profile_privacy_disclaimer"] = True
         saved = mongo_save_user_profile(
             query.from_user, _default_questionnaire(), completed=False
         )
@@ -539,12 +558,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             reply_markup = InlineKeyboardMarkup(
                 [
+                    [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
                     [InlineKeyboardButton("Create profile", callback_data="create_profile")],
                     [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
-                    [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
-                ]
-            )
-            text = "Welcome to our bot! Create your profile so we can match you with the best study group."
+            ]
+        )
+            text = build_profile_creation_intro()
         await safe_edit_or_send(
             query, context, text, reply_markup=reply_markup
         )
