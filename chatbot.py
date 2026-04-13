@@ -295,8 +295,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # so far
         await safe_edit_or_send(query, context, "\n".join(lines))
     elif query.data == "browse_groups":
-        msg = list_groups()
-        await query.edit_message_text(text=msg)
+        # 1. Get the list of groups ranked by affinity
+        recommendations = match_groups_to_user(query.from_user.id)
+
+        if not recommendations or isinstance(recommendations, str):
+            await safe_edit_or_send(
+                query, context, "No groups found or profile incomplete."
+            )
+            return
+
+        # 2. Build a clean text message
+        lines = ["🎯 **Best Group Matches for You:**\n"]
+        for rec in recommendations[:5]:  # Show top 5
+            lines.append(
+                f"👥 **{rec['name']}**\n"
+                f"   Match Score: {rec['score']}\n"
+                f"   Members: {', '.join(rec['members'])}\n"
+                f"   To join: `/group join {rec['name']}`\n"
+            )
+
+        await safe_edit_or_send(query, context, "\n".join(lines), parse_mode="Markdown")
     elif query.data.startswith("age:"):
         age = query.data.split(":", 1)[1]
         questionnaire = get_questionnaire(query.from_user.id)
