@@ -12,7 +12,6 @@ services:
 
   worker:
     build: .
-    container_name: comp7940-worker
     restart: unless-stopped
     command: celery -A celery_app.app worker --loglevel=info
     depends_on:
