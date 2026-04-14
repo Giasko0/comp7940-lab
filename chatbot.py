@@ -215,8 +215,16 @@ def generate_matchmaking_text(result):
 
 
 def load_course_info():
-    with COURSE_INFO_PATH.open("r", encoding="utf-8") as file:
-        return file.read()
+    candidates = [
+        COURSE_INFO_PATH,
+        Path("/comp7940-lab/course_info.md"),
+        Path.cwd() / "course_info.md",
+    ]
+    for path in candidates:
+        if path.exists():
+            with path.open("r", encoding="utf-8") as file:
+                return file.read()
+    raise FileNotFoundError("course_info.md not found in expected locations.")
 
 
 def queue_chat_message_log(telegram_user, user_text: str, bot_text: str) -> None:
