@@ -124,12 +124,18 @@ def get_config_value(config, section, option, fallback=None):
     return fallback
 
 
-def build_main_menu_keyboard(include_profile_edit: bool = False, include_back: bool = False):
+def build_main_menu_keyboard(
+    include_profile_edit: bool = False,
+    include_create_profile: bool = False,
+    include_back: bool = False,
+):
     keyboard = [
         [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
         [InlineKeyboardButton("Find people similar to you", callback_data="find_similar")],
         [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
     ]
+    if include_create_profile:
+        keyboard.append([InlineKeyboardButton("Create profile", callback_data="create_profile")])
     if include_profile_edit:
         keyboard.append([InlineKeyboardButton("Edit profile", callback_data="edit_profile")])
     if include_back:
@@ -277,18 +283,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = get_user_profile(user_id, username)
 
     if profile and profile.get("completed"):
-        reply_markup = build_main_menu_keyboard(
-            include_profile_edit=True, include_back=False
-        )
+        reply_markup = build_main_menu_keyboard(include_profile_edit=True)
         text = "Welcome back! What would you like to do next?"
     else:
-        reply_markup = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
-                [InlineKeyboardButton("Create profile", callback_data="create_profile")],
-                [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
-            ]
-        )
+        reply_markup = build_main_menu_keyboard(include_create_profile=True)
         text = build_profile_creation_intro()
 
     await update.message.reply_text(text, reply_markup=reply_markup)
@@ -339,7 +337,6 @@ async def ask_age(query, context, error=None):
             )
         ]
     )
-    keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     parts = []
     if show_privacy_disclaimer:
         parts.append(PROFILE_PRIVACY_DISCLAIMER)
@@ -373,7 +370,6 @@ async def ask_language(query, context, error=None):
             )
         ]
     )
-    keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     text = "Question 2/4: What language do you speak?"
     if error:
         text += f"\n\n{error}"
@@ -403,7 +399,6 @@ async def ask_gender(query, context, error=None):
             )
         ]
     )
-    keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     text = "Question 3/4: What is your gender?"
     if error:
         text += f"\n\n{error}"
@@ -433,7 +428,6 @@ async def ask_hobbies(query, context, error=None):
             )
         ]
     )
-    keyboard.append([InlineKeyboardButton("Back to menu", callback_data="back_to_main")])
     text = "Question 4/4: What are your hobbies (You can pick multiple)?"
     if error:
         text += f"\n\n{error}"
@@ -470,7 +464,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query,
             context,
             "Ask your question to the Virtual Professor.",
-            reply_markup=back_to_menu_markup(),
         )
     elif query.data == "manage_grouping":
         context.user_data["single_edit_mode"] = False
@@ -502,7 +495,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query,
             context,
             "Send the group name you want to create.",
-            reply_markup=back_to_menu_markup(),
         )
     elif query.data.startswith("edit_question:"):
         field = query.data.split(":", 1)[1]
@@ -565,18 +557,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["single_edit_mode"] = False
         profile = get_user_profile(query.from_user.id)
         if profile and profile.get("completed"):
-            reply_markup = build_main_menu_keyboard(
-                include_profile_edit=True, include_back=False
-            )
+            reply_markup = build_main_menu_keyboard(include_profile_edit=True)
             text = "What would you like to do next?"
         else:
-            reply_markup = InlineKeyboardMarkup(
-                [
-                    [InlineKeyboardButton("Virtual professor", callback_data="virtual_professor")],
-                    [InlineKeyboardButton("Create profile", callback_data="create_profile")],
-                    [InlineKeyboardButton("Manage grouping", callback_data="manage_grouping")],
-            ]
-        )
+            reply_markup = build_main_menu_keyboard(include_create_profile=True)
             text = build_profile_creation_intro()
         await safe_edit_or_send(
             query, context, text, reply_markup=reply_markup
