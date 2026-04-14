@@ -31,6 +31,7 @@ from urllib.parse import quote_plus, unquote_plus
 from Mongo_db import get_user_profile as mongo_get_user_profile
 from Mongo_db import get_user_profile_by_username
 from Mongo_db import save_chat_message, save_user_profile as mongo_save_user_profile
+from celery_app import save_message_async
 from Search import search_similar_users
 from ChatGPT_HKBU import ChatGPT
 
@@ -210,6 +211,19 @@ def generate_matchmaking_text(result):
 def load_course_info():
     with COURSE_INFO_PATH.open("r", encoding="utf-8") as file:
         return file.read()
+
+
+def queue_chat_message_log(telegram_user, user_text: str, bot_text: str) -> None:
+    try:
+        save_message_async.delay(
+            telegram_user.id,
+            telegram_user.username,
+            user_text,
+            bot_text,
+        )
+    except Exception as exc:
+        logging.exception("Failed to enqueue chat log, saving synchronously: %s", exc)
+        save_chat_message(telegram_user, user_text, bot_text)
 
 
 def main():
@@ -810,7 +824,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         response = gpt.submit(user_text)
 
-    save_chat_message(update.effective_user, user_text, response)
+    queue_chat_message_log(update.effective_user, user_text, response)
     await loading_message.edit_text(response, reply_markup=back_to_menu_markup())
 
 

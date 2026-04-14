@@ -10,6 +10,33 @@ services:
     networks:
       - comp7940-network
 
+  worker:
+    build: .
+    container_name: comp7940-worker
+    restart: unless-stopped
+    command: celery -A celery_app.app worker --loglevel=info
+    depends_on:
+      - redis
+    volumes:
+      - ./config.ini:/comp7940-lab/config.ini:ro
+    networks:
+      - comp7940-network
+
+  flower:
+    build: .
+    container_name: comp7940-flower
+    restart: unless-stopped
+    command: celery -A celery_app.app flower --port=5555
+    depends_on:
+      - redis
+      - worker
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./config.ini:/comp7940-lab/config.ini:ro
+    networks:
+      - comp7940-network
+
   redis:
     image: redis:7-alpine
     container_name: comp7940-redis

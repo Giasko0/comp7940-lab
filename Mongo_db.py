@@ -97,14 +97,19 @@ def save_user_profile(
     return True
 
 
-def save_chat_message(telegram_user, user_text: str, bot_text: str) -> bool:
+def save_chat_message(telegram_user, user_text: str, bot_text: str, username: str | None = None) -> bool:
     collection = get_collection()
+    telegram_user_id = _normalize_telegram_user_id(telegram_user)
+    resolved_username = username
+    if resolved_username is None and hasattr(telegram_user, "username"):
+        resolved_username = telegram_user.username
+
     try:
         collection.update_one(
-            {"telegram_user_id": telegram_user.id},
+            {"telegram_user_id": telegram_user_id},
             {
                 "$set": {
-                    "username": telegram_user.username or "unknown_user",
+                    "username": resolved_username or "unknown_user",
                     "updated_at": datetime.now(timezone.utc),
                 },
                 "$setOnInsert": {
