@@ -150,6 +150,12 @@ def build_profile_creation_intro():
     )
 
 
+def build_profile_disclaimer_view():
+    return build_profile_creation_intro(), InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Continue", callback_data="begin_profile")]]
+    )
+
+
 def back_to_menu_markup():
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("Back to menu", callback_data="back_to_main")]]
@@ -447,10 +453,14 @@ async def ask_hobbies(query, context, error=None):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.data not in {"virtual_professor", "group_create_prompt"}:
+    if query.data not in {"virtual_professor", "group_create_prompt", "begin_profile"}:
         context.user_data.pop("pending_action", None)
 
     if query.data == "create_profile":
+        context.user_data["single_edit_mode"] = False
+        text, reply_markup = build_profile_disclaimer_view()
+        await safe_edit_or_send(query, context, text, reply_markup=reply_markup)
+    elif query.data == "begin_profile":
         context.user_data["single_edit_mode"] = False
         context.user_data["show_profile_privacy_disclaimer"] = True
         saved = mongo_save_user_profile(
